@@ -1,3 +1,4 @@
+export const SERVERS = ["943", "1117"];
 export const SLOTS = ["21~22시", "22~23시", "23~24시", "24~01시", "01~02시"];
 export const HEROES = ["파드", "힐데", "하워드", "고든", "살로", "아마네", "첸코"];
 export const TROOPS = [

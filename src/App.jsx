@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SLOTS, HEROES, TROOPS, TG_LEVELS, T_LEVELS, RANKS, RALLY_SIZE, totalScore } from "./config.js";
+import { SERVERS, SLOTS, HEROES, TROOPS, TG_LEVELS, T_LEVELS, RANKS, RALLY_SIZE, totalScore } from "./config.js";
 
 // ===== 자동 배정 =====
 // 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
@@ -64,7 +64,7 @@ const emptyForm = () => ({
 });
 
 // ===== 사용자: 제출 =====
-function UserForm({ season, onDone }) {
+function UserForm({ server, season, onDone }) {
   const [f, setF] = useState(emptyForm());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -78,7 +78,7 @@ function UserForm({ season, onDone }) {
 
   const doSubmit = async () => {
     setBusy(true); setErr("");
-    const rec = { ...f, name: f.name.trim(), season };
+    const rec = { ...f, name: f.name.trim(), season, server };
     try { await api.submit(rec); onDone(rec); }
     catch (e) { setErr("저장에 실패했어요. 잠시 후 다시 시도해 주세요. (" + e.message + ")"); }
     setBusy(false);
@@ -116,7 +116,7 @@ function UserForm({ season, onDone }) {
 }
 
 // ===== 사용자: 결과 =====
-function UserResult({ season }) {
+function UserResult({ server, season }) {
   const [name, setName] = useState("");
   const [res, setRes] = useState(null);
   const [msg, setMsg] = useState("");
@@ -124,7 +124,7 @@ function UserResult({ season }) {
     setMsg(""); setRes(null);
     const n = name.trim();
     let a = null;
-    try { a = await api.getPublishedAssignment(season); } catch { return setMsg("불러오지 못했어요. 다시 시도해 주세요."); }
+    try { a = await api.getPublishedAssignment(server, season); } catch { return setMsg("불러오지 못했어요. 다시 시도해 주세요."); }
     if (!a) return setMsg("아직 배정 결과가 공개되지 않았어요.");
     const li = a.leaders.findIndex((l) => l && l.name === n);
     if (li >= 0) return setRes({ leader: true, rally: li + 1, members: a.groups[li] });
@@ -152,7 +152,7 @@ function UserResult({ season }) {
 // ===== 관리자 =====
 const EMPTY_ASSIGN = { leaders: Array(6).fill(null), reqs: {}, groups: Array(6).fill([]), unassigned: [], published: false };
 
-function Admin({ code, season, setSeason, logout }) {
+function Admin({ code, server, season, setSeason, logout }) {
   const [tab, setTab] = useState("list");
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -168,9 +168,9 @@ function Admin({ code, season, setSeason, logout }) {
   const reload = async () => {
     setLoading(true); setErr("");
     try {
-      const { data: list } = await call("list_submissions", { season });
+      const { data: list } = await call("list_submissions", { server, season });
       setSubs(list || []);
-      const { data: a } = await call("get_assignment", { season });
+      const { data: a } = await call("get_assignment", { server, season });
       if (a) setAssign({ leaders: a.leaders, reqs: a.reqs, groups: a.groups, unassigned: a.unassigned, published: a.published });
       else {
         const leaders = Array(6).fill(null).map((_, i) => { const s = (list || []).find((x) => x.trial_rank === String(i + 1)); return s ? { name: s.name } : null; });
@@ -184,7 +184,7 @@ function Admin({ code, season, setSeason, logout }) {
   const byName = Object.fromEntries(subs.map((s) => [s.name, s]));
   const save = async (next) => {
     setAssign(next);
-    try { await call("save_assignment", { season, ...next }); say("저장했어요"); } catch {}
+    try { await call("save_assignment", { server, season, ...next }); say("저장했어요"); } catch {}
   };
 
   const runAuto = () => save({ ...assign, ...autoAssign(subs, assign.leaders, assign.reqs) });
@@ -203,11 +203,11 @@ function Admin({ code, season, setSeason, logout }) {
   const togglePublish = () => save({ ...assign, published: !assign.published });
   const removeSub = async (name) => {
     if (!confirm(`${name} 제출을 삭제할까요?`)) return;
-    try { await call("delete_submission", { season, name }); reload(); } catch {}
+    try { await call("delete_submission", { server, season, name }); reload(); } catch {}
   };
   const newSeason = async () => {
     if (!confirm(`${season + 1}회차를 시작할까요? 이전 회차 데이터는 그대로 보관돼요.`)) return;
-    try { const r = await call("new_season"); setSeason(r.season); } catch {}
+    try { const r = await call("new_season", { server }); setSeason(r.season); } catch {}
   };
 
   const sorted = [...subs].sort((a, b) => totalScore(b) - totalScore(a));
@@ -296,10 +296,10 @@ function Admin({ code, season, setSeason, logout }) {
 
       {!loading && tab === "settings" && (
         <div>
-          <Field label="회차" hint={`현재 ${season}회차. 새 회차를 시작하면 제출이 새로 모여요.`}>
+          <Field label="회차" hint={`${server} 서버 현재 ${season}회차. 새 회차를 시작하면 이 서버의 제출이 새로 모여요.`}>
             <Btn kind="ghost" onClick={newSeason}>{season + 1}회차 시작</Btn>
           </Field>
-          <Field label="관리자 코드" hint="Supabase → Edge Functions → Secrets의 ADMIN_CODE 값을 바꾸면 됩니다." />
+          <Field label="관리자 코드" hint={`Supabase → Edge Functions → Secrets의 ADMIN_CODE_${server} 값을 바꾸면 됩니다.`} />
           <Field label="점수 기준" hint="병종 가중치 보병 3 · 궁병 2 · 기병 1 / 병종 점수 = TG×10 + (T−8)×3 (src/config.js에서 조정)" />
           <Btn kind="ghost" onClick={logout}>로그아웃</Btn>
         </div>
@@ -325,25 +325,33 @@ function MemberRow({ name, sub, current, onMove, overlap }) {
 
 // ===== 앱 =====
 export default function App() {
+  const [server, setServer] = useState(() => localStorage.getItem("server") || "");
   const [view, setView] = useState("home");
   const [season, setSeason] = useState(null);
-  const [code, setCode] = useState(() => sessionStorage.getItem("adminCode") || "");
+  const [admin, setAdmin] = useState(() => { try { return JSON.parse(sessionStorage.getItem("admin")) || null; } catch { return null; } });
   const [codeInput, setCodeInput] = useState("");
   const [codeErr, setCodeErr] = useState("");
   const [done, setDone] = useState(null);
   const [loadErr, setLoadErr] = useState("");
 
-  useEffect(() => {
-    if (!api.configured) return;
-    api.getSeason().then(setSeason).catch((e) => setLoadErr("서버 연결에 실패했어요: " + e.message));
-  }, []);
+  const activeServer = view === "admin" && admin ? admin.server : server;
 
+  useEffect(() => {
+    if (!api.configured || !activeServer) return;
+    setSeason(null);
+    api.getSeason(activeServer).then(setSeason).catch((e) => setLoadErr("서버 연결에 실패했어요: " + e.message));
+  }, [activeServer]);
+
+  const pickServer = (sv) => { localStorage.setItem("server", sv); setServer(sv); };
   const goHome = () => { setView("home"); setDone(null); };
-  const logout = () => { sessionStorage.removeItem("adminCode"); setCode(""); setView("home"); };
+  const logout = () => { sessionStorage.removeItem("admin"); setAdmin(null); setView("home"); };
   const tryLogin = async () => {
     setCodeErr("");
-    try { await api.admin(codeInput, "login"); sessionStorage.setItem("adminCode", codeInput); setCode(codeInput); setView("admin"); }
-    catch (e) { setCodeErr(/invalid code/.test(e.message) ? "코드가 맞지 않아요." : "확인 실패: " + e.message); }
+    try {
+      const r = await api.admin(codeInput, "login");
+      const a = { code: codeInput, server: r.server };
+      sessionStorage.setItem("admin", JSON.stringify(a)); setAdmin(a); setView("admin");
+    } catch (e) { setCodeErr(/invalid code/.test(e.message) ? "코드가 맞지 않아요." : "확인 실패: " + e.message); }
   };
 
   if (!api.configured) return (
@@ -355,7 +363,7 @@ export default function App() {
       <div className="top">
         <button className="title-btn" onClick={goHome}>
           <h1>집결 배정</h1>
-          <div className="sub">{season ? `${season}회차` : "…"}</div>
+          <div className="sub">{activeServer ? `${activeServer} 서버 · ${season ? `${season}회차` : "…"}` : "서버를 선택하세요"}</div>
         </button>
         {view !== "home" && <Btn small kind="ghost" onClick={goHome}>처음으로</Btn>}
       </div>
@@ -363,31 +371,36 @@ export default function App() {
 
       {view === "home" && (
         <div className="stack">
-          <Btn onClick={() => setView("form")} disabled={!season}>내 정보 제출하기</Btn>
-          <Btn kind="ghost" onClick={() => setView("result")} disabled={!season}>배정 결과 확인</Btn>
+          <Field label="내 서버">
+            <Pills options={SERVERS} value={server} onChange={pickServer} />
+          </Field>
+          <Btn onClick={() => setView("form")} disabled={!server || !season}>내 정보 제출하기</Btn>
+          <Btn kind="ghost" onClick={() => setView("result")} disabled={!server || !season}>배정 결과 확인</Btn>
           <div className="footer-link">
-            <button onClick={() => setView(code ? "admin" : "login")}>관리자</button>
+            <button onClick={() => setView(admin ? "admin" : "login")}>관리자</button>
           </div>
         </div>
       )}
-      {view === "form" && !done && <UserForm season={season} onDone={setDone} />}
+      {view === "form" && !done && <UserForm server={server} season={season} onDone={setDone} />}
       {view === "form" && done && (
         <div className="panel">
           <div className="ok" style={{ fontSize: 20, fontWeight: 700 }}>제출 완료</div>
-          <div className="mt">{done.name}님의 정보가 저장됐어요. 배정이 공개되면 "배정 결과 확인"에서 볼 수 있어요.</div>
+          <div className="mt">{done.name}님의 정보가 {server} 서버 {season}회차에 저장됐어요. 배정이 공개되면 "배정 결과 확인"에서 볼 수 있어요.</div>
         </div>
       )}
-      {view === "result" && <UserResult season={season} />}
+      {view === "result" && <UserResult server={server} season={season} />}
       {view === "login" && (
         <div>
-          <Field label="관리자 코드">
+          <Field label="관리자 코드" hint="입력한 코드에 해당하는 서버의 관리자 화면으로 들어가요.">
             <input type="password" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
           </Field>
           {codeErr && <div className="err">{codeErr}</div>}
           <Btn onClick={tryLogin} disabled={!codeInput}>들어가기</Btn>
         </div>
       )}
-      {view === "admin" && code && <Admin code={code} season={season} setSeason={setSeason} logout={logout} />}
+      {view === "admin" && admin && season && (
+        <Admin code={admin.code} server={admin.server} season={season} setSeason={setSeason} logout={logout} />
+      )}
     </div>
   );
 }

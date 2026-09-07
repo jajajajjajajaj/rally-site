@@ -6,10 +6,10 @@ export const configured = Boolean(URL && KEY);
 const sb = configured ? createClient(URL, KEY) : null;
 
 // ---- 공용 ----
-export async function getSeason() {
-  const { data, error } = await sb.from("settings").select("value").eq("key", "current_season").single();
+export async function getSeason(server) {
+  const { data, error } = await sb.from("settings").select("value").eq("key", "current_season:" + server).maybeSingle();
   if (error) throw error;
-  return Number(data.value);
+  return data ? Number(data.value) : 1;
 }
 
 // ---- 사용자 ----
@@ -18,9 +18,9 @@ export async function submit(rec) {
   if (error) throw error;
 }
 
-export async function getPublishedAssignment(season) {
+export async function getPublishedAssignment(server, season) {
   const { data, error } = await sb.from("assignments").select("leaders,groups,published")
-    .eq("season", season).maybeSingle();
+    .eq("server", server).eq("season", season).maybeSingle();
   if (error) throw error;
   return data; // RLS 때문에 비공개면 null
 }
