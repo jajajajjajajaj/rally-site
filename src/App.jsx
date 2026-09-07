@@ -401,6 +401,7 @@ export default function App() {
       {view === "admin" && admin && season && (
         <Admin code={admin.code} server={admin.server} season={season} setSeason={setSeason} logout={logout} />
       )}
+      <div className="made-by">made by 계산기</div>
     </div>
   );
 }

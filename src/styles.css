@@ -61,3 +61,4 @@ select.small { width: auto; padding: 4px 6px; font-size: 13px; }
 .member.nooverlap .n { color: var(--dim); }
 .footer-link { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 16px; }
 .footer-link button { background: none; border: 0; color: var(--dim); font-size: 13px; cursor: pointer; font-family: inherit; padding: 0; }
+.made-by { margin-top: 48px; text-align: center; font-size: 12px; color: var(--dim); opacity: 0.7; letter-spacing: 0.02em; }
