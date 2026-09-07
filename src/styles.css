@@ -1,0 +1,63 @@
+:root {
+  --bg: #16202B; --panel: #1F2C3A; --line: #2E3E50; --text: #E9EEF3; --dim: #8FA0B3;
+  --accent: #D8A93C; --accent-text: #1A1400; --danger: #D95F5F; --ok: #5FB58A;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+body { padding-bottom: env(safe-area-inset-bottom); }
+.wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px 64px; }
+.top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.top h1 { font-size: 20px; margin: 0; }
+.top .sub { font-size: 13px; color: var(--dim); }
+.title-btn { background: none; border: 0; color: inherit; text-align: left; padding: 0; cursor: pointer; }
+
+.field { margin-bottom: 24px; }
+.field .label { font-weight: 600; margin-bottom: 8px; }
+.field .hint { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+.panel { background: var(--panel); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+.panel h3 { margin: 0 0 10px; font-size: 17px; }
+.dim { color: var(--dim); font-size: 13px; }
+.err { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
+.ok { color: var(--ok); }
+.accent { color: var(--accent); }
+.mt { margin-top: 12px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+input, select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px; width: 100%; font-size: 16px; font-family: inherit; }
+select.small { width: auto; padding: 4px 6px; font-size: 13px; }
+
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { padding: 8px 12px; min-width: 44px; border-radius: 6px; font-size: 14px; font-weight: 500;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); cursor: pointer; font-family: inherit; }
+.pill.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.pill.xs { padding: 4px 8px; font-size: 12px; min-width: 0; }
+
+.btn { border-radius: 6px; font-weight: 600; cursor: pointer; font-family: inherit;
+  width: 100%; padding: 12px; font-size: 16px; }
+.btn.small { width: auto; padding: 6px 12px; font-size: 13px; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:focus-visible, .pill:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+
+.tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.tabs button { flex: 1; padding: 8px; border-radius: 6px; border: 0; font-weight: 600; font-size: 14px;
+  background: var(--panel); color: var(--text); cursor: pointer; font-family: inherit; }
+.tabs button.on { background: var(--accent); color: var(--accent-text); }
+.toast { background: var(--ok); color: #0B1F15; padding: 8px 12px; border-radius: 6px; font-size: 14px; margin-bottom: 12px; }
+
+.card { background: var(--panel); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+.card .name { font-weight: 700; }
+.card .score { font-size: 18px; font-weight: 700; color: var(--accent); }
+.member { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  background: var(--bg); border-radius: 6px; padding: 6px 8px; margin-top: 8px; }
+.member .info { min-width: 0; }
+.member .n { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member .m { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member.nooverlap .n { color: var(--dim); }
+.footer-link { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 16px; }
+.footer-link button { background: none; border: 0; color: var(--dim); font-size: 13px; cursor: pointer; font-family: inherit; padding: 0; }
