@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SERVERS, SLOTS, HEROES, TROOPS, TG_LEVELS, T_LEVELS, RANKS, RALLY_SIZE, totalScore } from "./config.js";
+import { SERVERS, SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, totalScore, STR } from "./config.js";
 
 // ===== 자동 배정 =====
 // 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
@@ -35,17 +35,22 @@ function autoAssign(subs, leaders, reqs) {
 }
 
 // ===== 조각 =====
-function Pills({ options, value, onChange, multi, xs }) {
+function Pills({ options, value, onChange, multi, xs, label }) {
   const isOn = (o) => (multi ? value.includes(o) : value === o);
   const toggle = (o) => multi ? onChange(isOn(o) ? value.filter((v) => v !== o) : [...value, o]) : onChange(o);
   return (
     <div className="pills">
       {options.map((o) => (
-        <button key={o} type="button" className={`pill ${isOn(o) ? "on" : ""} ${xs ? "xs" : ""}`} onClick={() => toggle(o)}>{o}</button>
+        <button key={o} type="button" className={`pill ${isOn(o) ? "on" : ""} ${xs ? "xs" : ""}`} onClick={() => toggle(o)}>{label ? label(o) : o}</button>
       ))}
     </div>
   );
 }
+// 표시용 라벨
+const slotLabel = (v) => { const s = SLOTS.find((x) => x.value === v); return s ? `${s.kst} KST (${s.utc} UTC)` : v; };
+const heroLabel = (lang) => (v) => { const h = HEROES.find((x) => x.value === v); return lang === "en" && h ? h.en : v; };
+const troopLabel = (lang, tr) => (lang === "en" ? tr.en : tr.ko);
+const rankLabel = (T) => (v) => (v === "그 외" ? T.other : v);
 const Field = ({ label, hint, children }) => (
   <div className="field">
     {label && <div className="label">{label}</div>}
@@ -60,63 +65,65 @@ const Btn = ({ children, onClick, kind = "primary", disabled, small }) => (
 const emptyForm = () => ({
   name: "", slots: [], trial_rank: "",
   inf_tg: null, inf_t: null, arc_tg: null, arc_t: null, cav_tg: null, cav_t: null,
-  heroes: Object.fromEntries(HEROES.map((h) => [h, false])),
+  heroes: Object.fromEntries(HERO_VALUES.map((h) => [h, false])),
 });
 
 // ===== 사용자: 제출 =====
-function UserForm({ server, season, onDone }) {
+function UserForm({ server, season, onDone, lang }) {
+  const T = STR[lang];
   const [f, setF] = useState(emptyForm());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
   const missing = [];
-  if (!f.name.trim()) missing.push("이름");
-  if (!f.slots.length) missing.push("가능 시간");
-  if (!f.trial_rank) missing.push("시련 순위");
-  TROOPS.forEach((t) => { if (!f[t.key + "_tg"] || !f[t.key + "_t"]) missing.push(`${t.label} 레벨`); });
+  if (!f.name.trim()) missing.push(T.field.name);
+  if (!f.slots.length) missing.push(T.field.slots);
+  if (!f.trial_rank) missing.push(T.field.rank);
+  TROOPS.forEach((t) => { if (!f[t.key + "_tg"] || !f[t.key + "_t"]) missing.push(T.field.level(troopLabel(lang, t))); });
 
   const doSubmit = async () => {
     setBusy(true); setErr("");
     const rec = { ...f, name: f.name.trim(), season, server };
     try { await api.submit(rec); onDone(rec); }
-    catch (e) { setErr("저장에 실패했어요. 잠시 후 다시 시도해 주세요. (" + e.message + ")"); }
+    catch (e) { setErr(T.saveFail + " (" + e.message + ")"); }
     setBusy(false);
   };
 
   return (
     <div>
-      <Field label="이름 (게임 닉네임)" hint="같은 이름으로 다시 제출하면 이전 내용이 덮어써져요.">
-        <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="닉네임" />
+      <Field label={T.name} hint={T.nameHint}>
+        <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder={T.nickname} />
       </Field>
-      <Field label="참여 가능한 시간 (한국시간)" hint="가능한 시간을 모두 선택">
-        <Pills options={SLOTS} value={f.slots} onChange={(v) => set("slots", v)} multi />
+      <Field label={T.slots} hint={T.slotsHint}>
+        <Pills options={SLOT_VALUES} value={f.slots} onChange={(v) => set("slots", v)} multi label={slotLabel} />
       </Field>
-      <Field label="서버 내 시련 순위">
-        <Pills options={RANKS} value={f.trial_rank} onChange={(v) => set("trial_rank", v)} />
+      <Field label={T.rank}>
+        <Pills options={RANK_VALUES} value={f.trial_rank} onChange={(v) => set("trial_rank", v)} label={rankLabel(T)} />
       </Field>
       {TROOPS.map((t) => (
         <div key={t.key} className="panel">
-          <h3>{t.label}</h3>
-          <div className="dim" style={{ marginBottom: 8 }}>TG 레벨</div>
+          <h3>{troopLabel(lang, t)}</h3>
+          <div className="dim" style={{ marginBottom: 8 }}>{T.tg}</div>
           <Pills options={TG_LEVELS} value={f[t.key + "_tg"]} onChange={(v) => set(t.key + "_tg", v)} />
-          <div className="dim mt" style={{ marginBottom: 8 }}>T 레벨</div>
+          <div className="dim mt" style={{ marginBottom: 8 }}>{T.t}</div>
           <Pills options={T_LEVELS} value={f[t.key + "_t"]} onChange={(v) => set(t.key + "_t", v)} />
         </div>
       ))}
-      <Field label="스킬 5렙 영웅" hint="5렙인 영웅만 선택">
-        <Pills options={HEROES} value={HEROES.filter((h) => f.heroes[h])}
-          onChange={(v) => set("heroes", Object.fromEntries(HEROES.map((h) => [h, v.includes(h)])))} multi />
+      <Field label={T.heroes} hint={T.heroesHint}>
+        <Pills options={HERO_VALUES} value={HERO_VALUES.filter((h) => f.heroes[h])} label={heroLabel(lang)}
+          onChange={(v) => set("heroes", Object.fromEntries(HERO_VALUES.map((h) => [h, v.includes(h)])))} multi />
       </Field>
-      {missing.length > 0 && <div className="dim" style={{ marginBottom: 12 }}>아직 입력 안 한 항목: {missing.join(", ")}</div>}
+      {missing.length > 0 && <div className="dim" style={{ marginBottom: 12 }}>{T.missing}: {missing.join(", ")}</div>}
       {err && <div className="err">{err}</div>}
-      <Btn onClick={doSubmit} disabled={busy || missing.length > 0}>{busy ? "저장 중…" : "제출하기"}</Btn>
+      <Btn onClick={doSubmit} disabled={busy || missing.length > 0}>{busy ? T.saving : T.submitBtn}</Btn>
     </div>
   );
 }
 
 // ===== 사용자: 결과 =====
-function UserResult({ server, season }) {
+function UserResult({ server, season, lang }) {
+  const T = STR[lang];
   const [name, setName] = useState("");
   const [res, setRes] = useState(null);
   const [msg, setMsg] = useState("");
@@ -124,25 +131,25 @@ function UserResult({ server, season }) {
     setMsg(""); setRes(null);
     const n = name.trim();
     let a = null;
-    try { a = await api.getPublishedAssignment(server, season); } catch { return setMsg("불러오지 못했어요. 다시 시도해 주세요."); }
-    if (!a) return setMsg("아직 배정 결과가 공개되지 않았어요.");
+    try { a = await api.getPublishedAssignment(server, season); } catch { return setMsg(T.loadFail); }
+    if (!a) return setMsg(T.notPublished);
     const li = a.leaders.findIndex((l) => l && l.name === n);
     if (li >= 0) return setRes({ leader: true, rally: li + 1, members: a.groups[li] });
     const gi = a.groups.findIndex((g) => g.includes(n));
-    if (gi < 0) return setMsg("배정 명단에 이름이 없어요. 닉네임을 확인해 주세요.");
+    if (gi < 0) return setMsg(T.notFound);
     setRes({ leader: false, rally: gi + 1, leaderName: a.leaders[gi]?.name, members: a.groups[gi] });
   };
   return (
     <div>
-      <Field label="닉네임"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && check()} /></Field>
-      <Btn onClick={check} disabled={!name.trim()}>결과 확인</Btn>
+      <Field label={T.nickname}><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && check()} /></Field>
+      <Btn onClick={check} disabled={!name.trim()}>{T.check}</Btn>
       {msg && <div className="dim mt">{msg}</div>}
       {res && (
         <div className="panel" style={{ marginTop: 20 }}>
-          <div className="accent" style={{ fontSize: 24, fontWeight: 700 }}>{res.rally}번 집결</div>
-          <div className="mt">{res.leader ? "당신이 집결장입니다." : `집결장: ${res.leaderName}`}</div>
-          <div className="dim mt">참여 인원</div>
-          <div>{res.members.join(", ") || "없음"}</div>
+          <div className="accent" style={{ fontSize: 24, fontWeight: 700 }}>{T.rally(res.rally)}</div>
+          <div className="mt">{res.leader ? T.youLead : `${T.leader}: ${res.leaderName}`}</div>
+          <div className="dim mt">{T.members}</div>
+          <div>{res.members.join(", ") || T.none}</div>
         </div>
       )}
     </div>
@@ -211,8 +218,8 @@ function Admin({ code, server, season, setSeason, logout }) {
   };
 
   const sorted = [...subs].sort((a, b) => totalScore(b) - totalScore(a));
-  const troopStr = (s) => TROOPS.map((t) => `${t.label} TG${s[t.key + "_tg"]}/T${s[t.key + "_t"]}`).join(" · ");
-  const heroStr = (s) => HEROES.filter((h) => s.heroes?.[h]).join(",") || "-";
+  const troopStr = (s) => TROOPS.map((t) => `${t.ko} TG${s[t.key + "_tg"]}/T${s[t.key + "_t"]}`).join(" · ");
+  const heroStr = (s) => HERO_VALUES.filter((h) => s.heroes?.[h]).join(",") || "-";
 
   return (
     <div>
@@ -274,7 +281,7 @@ function Admin({ code, server, season, setSeason, logout }) {
                 {leader && <div className="dim" style={{ marginBottom: 8 }}>집결장 시간 {[...lslots].join(", ") || "미입력"}</div>}
                 <div className="dim" style={{ marginBottom: 6 }}>필수 영웅 (5렙 보유자 수)</div>
                 <div className="pills" style={{ marginBottom: 10 }}>
-                  {HEROES.map((h) => {
+                  {HERO_VALUES.map((h) => {
                     const n = assign.reqs[gi]?.[h] || 0;
                     return <button key={h} type="button" className={`pill xs ${n ? "on" : ""}`} onClick={() => setReq(gi, h, (n + 1) % 5)}>{h}{n ? ` ×${n}` : ""}</button>;
                   })}
@@ -313,7 +320,7 @@ function MemberRow({ name, sub, current, onMove, overlap }) {
     <div className={`member ${overlap ? "" : "nooverlap"}`}>
       <div className="info">
         <div className="n">{name} <span className="accent">{sub ? totalScore(sub) : "?"}</span></div>
-        {sub && <div className="m">{sub.slots.join(",")} · {HEROES.filter((h) => sub.heroes?.[h]).join(",") || "-"}</div>}
+        {sub && <div className="m">{sub.slots.join(",")} · {HERO_VALUES.filter((h) => sub.heroes?.[h]).join(",") || "-"}</div>}
       </div>
       <select className="small" value={current} onChange={(e) => onMove(name, Number(e.target.value))}>
         {[0, 1, 2, 3, 4, 5].map((i) => <option key={i} value={i}>{i + 1}번</option>)}
@@ -326,6 +333,9 @@ function MemberRow({ name, sub, current, onMove, overlap }) {
 // ===== 앱 =====
 export default function App() {
   const [server, setServer] = useState(() => localStorage.getItem("server") || "");
+  const [lang, setLang] = useState(() => localStorage.getItem("lang") || (navigator.language?.startsWith("ko") ? "ko" : "en"));
+  const T = STR[lang];
+  const toggleLang = () => { const l = lang === "ko" ? "en" : "ko"; localStorage.setItem("lang", l); setLang(l); };
   const [view, setView] = useState("home");
   const [season, setSeason] = useState(null);
   const [admin, setAdmin] = useState(() => { try { return JSON.parse(sessionStorage.getItem("admin")) || null; } catch { return null; } });
@@ -339,7 +349,7 @@ export default function App() {
   useEffect(() => {
     if (!api.configured || !activeServer) return;
     setSeason(null);
-    api.getSeason(activeServer).then(setSeason).catch((e) => setLoadErr("서버 연결에 실패했어요: " + e.message));
+    api.getSeason(activeServer).then(setSeason).catch((e) => setLoadErr(T.connFail + ": " + e.message));
   }, [activeServer]);
 
   const pickServer = (sv) => { localStorage.setItem("server", sv); setServer(sv); };
@@ -355,47 +365,50 @@ export default function App() {
   };
 
   if (!api.configured) return (
-    <div className="wrap"><div className="err">환경 변수 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY가 설정되지 않았어요. Vercel 프로젝트 설정에서 추가한 뒤 다시 배포하세요.</div></div>
+    <div className="wrap"><div className="err">{T.envMissing}</div></div>
   );
 
   return (
     <div className="wrap">
       <div className="top">
         <button className="title-btn" onClick={goHome}>
-          <h1>집결 배정</h1>
-          <div className="sub">{activeServer ? `${activeServer} 서버 · ${season ? `${season}회차` : "…"}` : "서버를 선택하세요"}</div>
+          <h1>{T.title}</h1>
+          <div className="sub">{activeServer ? `${T.server} ${activeServer} · ${season ? T.season(season) : "…"}` : T.pickServer}</div>
         </button>
-        {view !== "home" && <Btn small kind="ghost" onClick={goHome}>처음으로</Btn>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <Btn small kind="ghost" onClick={toggleLang}>{lang === "ko" ? "EN" : "한국어"}</Btn>
+          {view !== "home" && <Btn small kind="ghost" onClick={goHome}>{T.home}</Btn>}
+        </div>
       </div>
       {loadErr && <div className="err">{loadErr}</div>}
 
       {view === "home" && (
         <div className="stack">
-          <Field label="내 서버">
+          <Field label={T.myServer}>
             <Pills options={SERVERS} value={server} onChange={pickServer} />
           </Field>
-          <Btn onClick={() => setView("form")} disabled={!server || !season}>내 정보 제출하기</Btn>
-          <Btn kind="ghost" onClick={() => setView("result")} disabled={!server || !season}>배정 결과 확인</Btn>
+          <Btn onClick={() => setView("form")} disabled={!server || !season}>{T.submit}</Btn>
+          <Btn kind="ghost" onClick={() => setView("result")} disabled={!server || !season}>{T.checkResult}</Btn>
           <div className="footer-link">
-            <button onClick={() => setView(admin ? "admin" : "login")}>관리자</button>
+            <button onClick={() => setView(admin ? "admin" : "login")}>{T.admin}</button>
           </div>
         </div>
       )}
-      {view === "form" && !done && <UserForm server={server} season={season} onDone={setDone} />}
+      {view === "form" && !done && <UserForm server={server} season={season} onDone={setDone} lang={lang} />}
       {view === "form" && done && (
         <div className="panel">
-          <div className="ok" style={{ fontSize: 20, fontWeight: 700 }}>제출 완료</div>
-          <div className="mt">{done.name}님의 정보가 {server} 서버 {season}회차에 저장됐어요. 배정이 공개되면 "배정 결과 확인"에서 볼 수 있어요.</div>
+          <div className="ok" style={{ fontSize: 20, fontWeight: 700 }}>{T.doneTitle}</div>
+          <div className="mt">{T.done(done.name, server, season)}</div>
         </div>
       )}
-      {view === "result" && <UserResult server={server} season={season} />}
+      {view === "result" && <UserResult server={server} season={season} lang={lang} />}
       {view === "login" && (
         <div>
-          <Field label="관리자 코드" hint="입력한 코드에 해당하는 서버의 관리자 화면으로 들어가요.">
+          <Field label={T.adminCode} hint={T.adminCodeHint}>
             <input type="password" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
           </Field>
           {codeErr && <div className="err">{codeErr}</div>}
-          <Btn onClick={tryLogin} disabled={!codeInput}>들어가기</Btn>
+          <Btn onClick={tryLogin} disabled={!codeInput}>{T.enter}</Btn>
         </div>
       )}
       {view === "admin" && admin && season && (
