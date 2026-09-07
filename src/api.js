@@ -14,7 +14,7 @@ export async function getSeason() {
 
 // ---- 사용자 ----
 export async function submit(rec) {
-  const { error } = await sb.from("submissions").upsert(rec, { onConflict: "season,name" });
+  const { error } = await sb.rpc("submit_entry", { p: rec });
   if (error) throw error;
 }
 
