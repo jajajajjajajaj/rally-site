@@ -19,7 +19,7 @@ export async function submit(rec) {
 }
 
 export async function getPublishedAssignment(server, season) {
-  const { data, error } = await sb.from("assignments").select("leaders,groups,published")
+  const { data, error } = await sb.from("assignments").select("leaders,groups,reqs,published")
     .eq("server", server).eq("season", season).maybeSingle();
   if (error) throw error;
   return data; // RLS 때문에 비공개면 null

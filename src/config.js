@@ -31,6 +31,8 @@ export const TG_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const T_LEVELS = [9, 10, 11];
 export const RANK_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "그 외"];
 export const RALLY_SIZE = 8;
+export const RIDER_RALLIES = 4;   // 영웅 탑승 지정을 적용할 집결 수 (1~4번)
+export const RIDERS_PER_RALLY = 4;
 
 // 점수: 병종 가중치 × (TG×10 + (T−8)×3)
 export const troopScore = (tg, t) => tg * 10 + (t - 8) * 3;
@@ -53,6 +55,7 @@ export const STR = {
     loadFail: "불러오지 못했어요. 다시 시도해 주세요.", rally: (n) => `${n}번 집결`, youLead: "당신이 집결장입니다.", leader: "집결장", members: "참여 인원", none: "없음",
     adminCode: "관리자 코드", adminCodeHint: "입력한 코드에 해당하는 서버의 관리자 화면으로 들어가요.", wrongCode: "코드가 맞지 않아요.", enter: "들어가기",
     connFail: "서버 연결에 실패했어요", envMissing: "환경 변수 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY가 설정되지 않았어요.",
+    riders: "영웅 탑승", yourHero: (h) => `당신은 ${h} 영웅으로 탑승해 주세요.`,
     field: { name: "이름", slots: "가능 시간", rank: "시련 순위", level: (tr) => `${tr} 레벨` },
   },
   en: {
@@ -69,6 +72,7 @@ export const STR = {
     loadFail: "Could not load. Please try again.", rally: (n) => `Rally ${n}`, youLead: "You are the rally leader.", leader: "Leader", members: "Members", none: "None",
     adminCode: "Admin code", adminCodeHint: "Opens the admin page for the server matching your code.", wrongCode: "Incorrect code.", enter: "Enter",
     connFail: "Could not connect to server", envMissing: "Environment variables VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set.",
+    riders: "Hero assignments", yourHero: (h) => `Please join with ${h}.`,
     field: { name: "Name", slots: "Available time", rank: "Trial rank", level: (tr) => `${tr} level` },
   },
 };

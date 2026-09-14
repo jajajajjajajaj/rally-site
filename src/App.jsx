@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SERVERS, SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, totalScore, STR } from "./config.js";
+import { SERVERS, SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, STR } from "./config.js";
 
 // ===== 자동 배정 =====
 // 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
@@ -32,6 +32,24 @@ function autoAssign(subs, leaders, reqs) {
   });
   pool.sort((a, b) => totalScore(b) - totalScore(a));
   return { groups, unassigned: pool.map((s) => s.name) };
+}
+
+// 필수 영웅 설정(reqs)을 바탕으로 집결별 탑승 영웅 자동 채우기 (1~4번 집결, 집결당 4명)
+function autoRiders(groups, reqs, byName) {
+  const riders = {};
+  for (let gi = 0; gi < RIDER_RALLIES; gi++) {
+    const members = (groups[gi] || []).map((n) => byName[n]).filter(Boolean).sort((a, b) => totalScore(b) - totalScore(a));
+    const used = new Set(); const list = [];
+    for (const hero of Object.keys(reqs[gi] || {})) {
+      let n = reqs[gi][hero];
+      for (const m of members) {
+        if (n <= 0 || list.length >= RIDERS_PER_RALLY) break;
+        if (!used.has(m.name) && m.heroes?.[hero]) { list.push({ name: m.name, hero }); used.add(m.name); n--; }
+      }
+    }
+    riders[gi] = list;
+  }
+  return riders;
 }
 
 // ===== 조각 =====
@@ -133,11 +151,13 @@ function UserResult({ server, season, lang }) {
     let a = null;
     try { a = await api.getPublishedAssignment(server, season); } catch { return setMsg(T.loadFail); }
     if (!a) return setMsg(T.notPublished);
+    const ridersOf = (gi) => a.reqs?.riders?.[gi] || [];
     const li = a.leaders.findIndex((l) => l && l.name === n);
-    if (li >= 0) return setRes({ leader: true, rally: li + 1, members: a.groups[li] });
+    if (li >= 0) return setRes({ leader: true, rally: li + 1, members: a.groups[li], riders: ridersOf(li) });
     const gi = a.groups.findIndex((g) => g.includes(n));
     if (gi < 0) return setMsg(T.notFound);
-    setRes({ leader: false, rally: gi + 1, leaderName: a.leaders[gi]?.name, members: a.groups[gi] });
+    const riders = ridersOf(gi);
+    setRes({ leader: false, rally: gi + 1, leaderName: a.leaders[gi]?.name, members: a.groups[gi], riders, myHero: riders.find((r) => r.name === n)?.hero });
   };
   return (
     <div>
@@ -148,6 +168,13 @@ function UserResult({ server, season, lang }) {
         <div className="panel" style={{ marginTop: 20 }}>
           <div className="accent" style={{ fontSize: 24, fontWeight: 700 }}>{T.rally(res.rally)}</div>
           <div className="mt">{res.leader ? T.youLead : `${T.leader}: ${res.leaderName}`}</div>
+          {res.myHero && <div className="mt" style={{ fontWeight: 700, color: "var(--ok)" }}>{T.yourHero(heroLabel(lang)(res.myHero))}</div>}
+          {res.riders.length > 0 && (
+            <>
+              <div className="dim mt">{T.riders}</div>
+              <div>{res.riders.map((r) => `${r.name} — ${heroLabel(lang)(r.hero)}`).join(" · ")}</div>
+            </>
+          )}
           <div className="dim mt">{T.members}</div>
           <div>{res.members.join(", ") || T.none}</div>
         </div>
@@ -194,7 +221,19 @@ function Admin({ code, server, season, setSeason, logout }) {
     try { await call("save_assignment", { server, season, ...next }); say("저장했어요"); } catch {}
   };
 
-  const runAuto = () => save({ ...assign, ...autoAssign(subs, assign.leaders, assign.reqs) });
+  const riders = assign.reqs.riders || {};
+  const setRiders = (gi, list) => save({ ...assign, reqs: { ...assign.reqs, riders: { ...riders, [gi]: list } } });
+  const setRider = (gi, i, patch) => {
+    const list = [...(riders[gi] || [])];
+    while (list.length <= i) list.push({ name: "", hero: "" });
+    list[i] = { ...list[i], ...patch };
+    setRiders(gi, list.filter((r, k) => k <= i || r.name || r.hero));
+  };
+  const runAuto = () => {
+    const r = autoAssign(subs, assign.leaders, assign.reqs);
+    const auto = autoRiders(r.groups, assign.reqs, byName);
+    save({ ...assign, ...r, reqs: { ...assign.reqs, riders: auto } });
+  };
   const moveMember = (name, toIdx) => {
     const groups = assign.groups.map((g) => g.filter((n) => n !== name));
     let unassigned = assign.unassigned.filter((n) => n !== name);
@@ -286,6 +325,31 @@ function Admin({ code, server, season, setSeason, logout }) {
                     return <button key={h} type="button" className={`pill xs ${n ? "on" : ""}`} onClick={() => setReq(gi, h, (n + 1) % 5)}>{h}{n ? ` ×${n}` : ""}</button>;
                   })}
                 </div>
+                {gi < RIDER_RALLIES && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div className="row" style={{ marginBottom: 6 }}>
+                      <span className="dim">영웅 탑승 지정 ({RIDERS_PER_RALLY}명)</span>
+                      <Btn small kind="ghost" onClick={() => setRiders(gi, autoRiders(assign.groups, assign.reqs, byName)[gi])}>필수 영웅으로 자동</Btn>
+                    </div>
+                    {Array.from({ length: RIDERS_PER_RALLY }).map((_, i) => {
+                      const r = riders[gi]?.[i] || { name: "", hero: "" };
+                      const m = byName[r.name];
+                      return (
+                        <div key={i} className="row" style={{ marginBottom: 4 }}>
+                          <select className="small" style={{ flex: 1 }} value={r.name} onChange={(e) => setRider(gi, i, { name: e.target.value })}>
+                            <option value="">— 집결원 —</option>
+                            {(assign.groups[gi] || []).map((n) => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                          <select className="small" style={{ flex: 1 }} value={r.hero} onChange={(e) => setRider(gi, i, { hero: e.target.value })}>
+                            <option value="">— 영웅 —</option>
+                            {HERO_VALUES.map((h) => <option key={h} value={h}>{h}{m?.heroes?.[h] ? " ★" : ""}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                    <div className="dim" style={{ fontSize: 12 }}>★ = 그 사람이 5렙 보유한 영웅</div>
+                  </div>
+                )}
                 <div className="dim">인원 {assign.groups[gi]?.length || 0}/{RALLY_SIZE}</div>
                 {(assign.groups[gi] || []).map((n) => (
                   <MemberRow key={n} name={n} sub={byName[n]} current={gi} onMove={moveMember}
