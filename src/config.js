@@ -31,7 +31,7 @@ export const TG_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const T_LEVELS = [9, 10, 11];
 export const RANK_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "그 외"];
 export const RALLY_SIZE = 8;
-export const RIDER_RALLIES = 4;   // 영웅 탑승 지정을 적용할 집결 수 (1~4번)
+export const RIDER_RALLIES = 6;   // 영웅 탑승 지정을 적용할 집결 수 (1~6번)
 export const RIDERS_PER_RALLY = 4;
 
 // 점수: 병종 가중치 × (TG×10 + (T−8)×3)
