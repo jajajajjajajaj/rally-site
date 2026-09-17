@@ -20,6 +20,7 @@ export const HEROES = [
   { value: "첸코", en: "Chenko" },
   { value: "트리톤", en: "Triton" },
   { value: "비비안", en: "Vivian" },
+  { value: "쓰루드", en: "Thrud" },
 ];
 export const HERO_VALUES = HEROES.map((h) => h.value);
 
