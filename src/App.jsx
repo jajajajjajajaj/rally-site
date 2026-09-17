@@ -527,7 +527,7 @@ export default function App() {
       {view === "admin" && admin && season && (
         <Admin code={admin.code} server={admin.server} owner={admin.owner} season={season} setSeason={setSeason} logout={logout} />
       )}
-      <div className="made-by">made by 계산기</div>
+      <div className="made-by">made by 프랜시스베이컨 서버 추가문의 943 프랜시스 베이컨</div>
     </div>
   );
 }
