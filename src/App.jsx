@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SERVERS, SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, STR } from "./config.js";
+import { SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, STR } from "./config.js";
 
 // ===== 자동 배정 =====
 // 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
@@ -186,7 +186,7 @@ function UserResult({ server, season, lang }) {
 // ===== 관리자 =====
 const EMPTY_ASSIGN = { leaders: Array(6).fill(null), reqs: {}, groups: Array(6).fill([]), unassigned: [], published: false };
 
-function Admin({ code, server, season, setSeason, logout }) {
+function Admin({ code, server, owner, season, setSeason, logout }) {
   const [tab, setTab] = useState("list");
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -370,11 +370,52 @@ function Admin({ code, server, season, setSeason, logout }) {
           <Field label="회차" hint={`${server} 서버 현재 ${season}회차. 새 회차를 시작하면 이 서버의 제출이 새로 모여요.`}>
             <Btn kind="ghost" onClick={newSeason}>{season + 1}회차 시작</Btn>
           </Field>
-          <Field label="관리자 코드" hint={`Supabase → Edge Functions → Secrets의 ADMIN_CODE_${server} 값을 바꾸면 됩니다.`} />
+          {owner ? <OwnerPanel call={call} say={say} /> : <Field label="관리자 코드" hint="코드 변경은 총괄 관리자에게 요청하세요." />}
           <Field label="점수 기준" hint="병종 가중치 보병 3 · 궁병 2 · 기병 1 / 병종 점수 = TG×10 + (T−8)×3 (src/config.js에서 조정)" />
           <Btn kind="ghost" onClick={logout}>로그아웃</Btn>
         </div>
       )}
+    </div>
+  );
+}
+
+// ===== 총괄 관리자: 서버 관리 =====
+function OwnerPanel({ call, say }) {
+  const [list, setList] = useState([]);
+  const [target, setTarget] = useState(""); const [code, setCode] = useState("");
+  const [edit, setEdit] = useState({});   // {server: newCode}
+  const load = async () => { try { const r = await call("list_servers", { server: "-" }); setList(r.data || []); } catch {} };
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    try { await call("add_server", { server: "-", target: target.trim(), code: code.trim() }); setTarget(""); setCode(""); say("서버를 추가했어요"); load(); } catch {}
+  };
+  const setCodeFor = async (sv) => {
+    const c = (edit[sv] || "").trim(); if (c.length < 4) return say("코드는 4자 이상");
+    try { await call("set_code", { server: "-", target: sv, code: c }); setEdit({ ...edit, [sv]: "" }); say(`${sv} 서버 코드를 변경했어요`); } catch {}
+  };
+  const remove = async (sv) => {
+    if (!confirm(`${sv} 서버를 목록에서 삭제할까요? (제출 데이터는 남습니다)`)) return;
+    try { await call("delete_server", { server: "-", target: sv }); say("삭제했어요"); load(); } catch {}
+  };
+  return (
+    <div className="panel" style={{ border: "1px solid var(--accent)" }}>
+      <h3>총괄 관리자 · 서버 관리</h3>
+      <div className="dim" style={{ marginBottom: 8 }}>서버 추가</div>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <input inputMode="numeric" placeholder="서버 번호" value={target} onChange={(e) => setTarget(e.target.value)} />
+        <input type="password" placeholder="관리자 코드 (4자+)" value={code} onChange={(e) => setCode(e.target.value)} />
+        <Btn small onClick={add} disabled={!target.trim() || code.trim().length < 4}>추가</Btn>
+      </div>
+      <div className="dim" style={{ marginBottom: 6 }}>등록된 서버 ({list.length})</div>
+      {list.map((r) => (
+        <div key={r.server} className="member" style={{ flexWrap: "wrap" }}>
+          <div className="n" style={{ minWidth: 60 }}>{r.server}</div>
+          <input type="password" placeholder="새 코드" value={edit[r.server] || ""} onChange={(e) => setEdit({ ...edit, [r.server]: e.target.value })} style={{ flex: 1, minWidth: 100, padding: "4px 8px", fontSize: 13 }} />
+          <Btn small kind="ghost" onClick={() => setCodeFor(r.server)}>코드 변경</Btn>
+          <Btn small kind="danger" onClick={() => remove(r.server)}>삭제</Btn>
+        </div>
+      ))}
+      <div className="dim mt" style={{ fontSize: 12 }}>총괄 코드(OWNER_CODE)는 Supabase Secrets에서만 바꿀 수 있어요. 서버 관리자는 자기 코드를 바꿀 수 없습니다.</div>
     </div>
   );
 }
@@ -408,7 +449,7 @@ export default function App() {
   const [done, setDone] = useState(null);
   const [loadErr, setLoadErr] = useState("");
 
-  const activeServer = view === "admin" && admin ? admin.server : server;
+  const activeServer = server;
 
   useEffect(() => {
     if (!api.configured || !activeServer) return;
@@ -417,13 +458,19 @@ export default function App() {
   }, [activeServer]);
 
   const pickServer = (sv) => { localStorage.setItem("server", sv); setServer(sv); };
+  const [servers, setServers] = useState(null);
+  useEffect(() => {
+    if (!api.configured) return;
+    api.listServers().then((l) => { setServers(l); if (server && !l.includes(server)) { localStorage.removeItem("server"); setServer(""); } })
+      .catch(() => setServers([]));
+  }, []);
   const goHome = () => { setView("home"); setDone(null); };
   const logout = () => { sessionStorage.removeItem("admin"); setAdmin(null); setView("home"); };
   const tryLogin = async () => {
     setCodeErr("");
     try {
-      const r = await api.admin(codeInput, "login");
-      const a = { code: codeInput, server: r.server };
+      const r = await api.admin(codeInput, "login", { server });
+      const a = { code: codeInput, server, owner: r.owner };
       sessionStorage.setItem("admin", JSON.stringify(a)); setAdmin(a); setView("admin");
     } catch (e) { setCodeErr(/invalid code/.test(e.message) ? "코드가 맞지 않아요." : "확인 실패: " + e.message); }
   };
@@ -449,12 +496,14 @@ export default function App() {
       {view === "home" && (
         <div className="stack">
           <Field label={T.myServer}>
-            <Pills options={SERVERS} value={server} onChange={pickServer} />
+            {servers === null ? <div className="dim">{T.loadingServers}</div>
+              : servers.length === 0 ? <div className="dim">{T.noServers}</div>
+              : <Pills options={servers} value={server} onChange={pickServer} />}
           </Field>
           <Btn onClick={() => setView("form")} disabled={!server || !season}>{T.submit}</Btn>
           <Btn kind="ghost" onClick={() => setView("result")} disabled={!server || !season}>{T.checkResult}</Btn>
           <div className="footer-link">
-            <button onClick={() => setView(admin ? "admin" : "login")}>{T.admin}</button>
+            <button onClick={() => server && setView(admin ? "admin" : "login")} disabled={!server} style={{ opacity: server ? 1 : 0.4 }}>{T.admin}</button>
           </div>
         </div>
       )}
@@ -476,7 +525,7 @@ export default function App() {
         </div>
       )}
       {view === "admin" && admin && season && (
-        <Admin code={admin.code} server={admin.server} season={season} setSeason={setSeason} logout={logout} />
+        <Admin code={admin.code} server={admin.server} owner={admin.owner} season={season} setSeason={setSeason} logout={logout} />
       )}
       <div className="made-by">made by 계산기</div>
     </div>

@@ -25,6 +25,12 @@ export async function getPublishedAssignment(server, season) {
   return data; // RLS 때문에 비공개면 null
 }
 
+export async function listServers() {
+  const { data, error } = await sb.rpc("list_servers");
+  if (error) throw error;
+  return data || [];
+}
+
 // ---- 관리자 (Edge Function) ----
 export async function admin(code, action, payload = {}) {
   const { data, error } = await sb.functions.invoke("admin", { body: { code, action, payload } });

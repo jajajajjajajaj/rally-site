@@ -1,4 +1,3 @@
-export const SERVERS = ["943", "1117"];
 
 // 시간대: value는 저장되는 값(기존 데이터와 호환), kst/utc는 표시용
 export const SLOTS = [
@@ -58,6 +57,7 @@ export const STR = {
     adminCode: "관리자 코드", adminCodeHint: "입력한 코드에 해당하는 서버의 관리자 화면으로 들어가요.", wrongCode: "코드가 맞지 않아요.", enter: "들어가기",
     connFail: "서버 연결에 실패했어요", envMissing: "환경 변수 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY가 설정되지 않았어요.",
     riders: "영웅 탑승", yourHero: (h) => `당신은 ${h} 영웅으로 탑승해 주세요.`,
+    noServers: "등록된 서버가 없어요. 총괄 관리자가 서버를 추가해야 합니다.", loadingServers: "서버 목록 불러오는 중…",
     field: { name: "이름", slots: "가능 시간", rank: "시련 순위", level: (tr) => `${tr} 레벨` },
   },
   en: {
@@ -75,6 +75,7 @@ export const STR = {
     adminCode: "Admin code", adminCodeHint: "Opens the admin page for the server matching your code.", wrongCode: "Incorrect code.", enter: "Enter",
     connFail: "Could not connect to server", envMissing: "Environment variables VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set.",
     riders: "Hero assignments", yourHero: (h) => `Please join with ${h}.`,
+    noServers: "No servers registered yet. The head admin needs to add one.", loadingServers: "Loading servers…",
     field: { name: "Name", slots: "Available time", rank: "Trial rank", level: (tr) => `${tr} level` },
   },
 };
