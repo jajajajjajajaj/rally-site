@@ -40,6 +40,12 @@ export const RIDERS_PER_RALLY = 4;
 export const troopScore = (tg, t) => tg * 10 + (t - 8) * 3;
 export const totalScore = (s) =>
   TROOPS.reduce((acc, tr) => acc + tr.w * troopScore(s[tr.key + "_tg"], s[tr.key + "_t"]), 0);
+// 집결별 병종 점수: 집결장이 고른 병종(keys: "inf"/"arc"/"cav")만 가중치 없이 합산.
+// 고른 병종이 없으면 기존 가중 합산(totalScore)을 그대로 사용.
+export const rallyScore = (s, keys) =>
+  !keys || keys.length === 0
+    ? totalScore(s)
+    : TROOPS.filter((tr) => keys.includes(tr.key)).reduce((acc, tr) => acc + troopScore(s[tr.key + "_tg"], s[tr.key + "_t"]), 0);
 
 // ===== 문구 =====
 export const STR = {

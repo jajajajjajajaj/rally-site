@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, STR } from "./config.js";
+import { SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, rallyScore, STR } from "./config.js";
 
 // ===== 자동 배정 =====
 // 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
+//    - 점수는 집결장이 고른 병종(reqs.troops[gi])만 합산. 안 고르면 전체 가중 점수
 // 2) 집결마다 지정된 필수 영웅 5렙 보유자를 먼저 확보
 // 3) 1번 집결부터 순서대로 8명씩
 function autoAssign(subs, leaders, reqs) {
@@ -16,7 +17,8 @@ function autoAssign(subs, leaders, reqs) {
     if (!leader) return;
     const lslots = new Set(byName[leader.name]?.slots || []);
     const overlaps = (s) => (lslots.size === 0 ? true : (s.slots || []).some((x) => lslots.has(x)));
-    const order = (a, b) => (overlaps(b) - overlaps(a)) || (totalScore(b) - totalScore(a));
+    const score = (s) => rallyScore(s, reqs.troops?.[gi]);
+    const order = (a, b) => (overlaps(b) - overlaps(a)) || (score(b) - score(a));
     pool.sort(order);
 
     const need = reqs[gi] || {};
@@ -34,11 +36,12 @@ function autoAssign(subs, leaders, reqs) {
   return { groups, unassigned: pool.map((s) => s.name) };
 }
 
-// 필수 영웅 설정(reqs)을 바탕으로 집결별 탑승 영웅 자동 채우기 (1~4번 집결, 집결당 4명)
+// 필수 영웅 설정(reqs)을 바탕으로 집결별 탑승 영웅 자동 채우기 (1~RIDER_RALLIES번 집결, 집결당 RIDERS_PER_RALLY명)
 function autoRiders(groups, reqs, byName) {
   const riders = {};
   for (let gi = 0; gi < RIDER_RALLIES; gi++) {
-    const members = (groups[gi] || []).map((n) => byName[n]).filter(Boolean).sort((a, b) => totalScore(b) - totalScore(a));
+    const score = (s) => rallyScore(s, reqs.troops?.[gi]);
+    const members = (groups[gi] || []).map((n) => byName[n]).filter(Boolean).sort((a, b) => score(b) - score(a));
     const used = new Set(); const list = [];
     for (const hero of Object.keys(reqs[gi] || {})) {
       let n = reqs[gi][hero];
@@ -223,6 +226,10 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
 
   const riders = assign.reqs.riders || {};
   const setRiders = (gi, list) => save({ ...assign, reqs: { ...assign.reqs, riders: { ...riders, [gi]: list } } });
+  // 집결별 병종 선택 {gi: ["inf","cav"]} — 바로 저장
+  const troopsSel = assign.reqs.troops || {};
+  const setTroops = (gi, keys) => save({ ...assign, reqs: { ...assign.reqs, troops: { ...troopsSel, [gi]: keys } } });
+  const troopsLabel = (gi) => (troopsSel[gi]?.length ? troopsSel[gi].map((k) => TROOPS.find((t) => t.key === k)?.ko).join("+") : "전체(가중)");
   const setRider = (gi, i, patch) => {
     const list = [...(riders[gi] || [])];
     while (list.length <= i) list.push({ name: "", hero: "" });
@@ -304,7 +311,7 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
             </div>
           </div>
           <Btn onClick={runAuto} disabled={!subs.length}>자동 배정 실행</Btn>
-          <div className="dim" style={{ margin: "6px 0 16px" }}>1번 집결부터 강한 순서로 채워요. 집결장과 시간이 겹치는 사람을 먼저 넣고, 필수 영웅을 지정하면 그 영웅 5렙 보유자를 우선 확보해요. 회색 이름은 집결장과 겹치는 시간이 없는 사람이에요.</div>
+          <div className="dim" style={{ margin: "6px 0 16px" }}>1번 집결부터 강한 순서로 채워요. 집결마다 병종을 고르면 그 병종 점수만으로 순위를 매기고(안 고르면 전체 가중 점수), 집결장과 시간이 겹치는 사람을 먼저 넣고, 필수 영웅을 지정하면 그 영웅 5렙 보유자를 우선 확보해요. 회색 이름은 집결장과 겹치는 시간이 없는 사람이에요.</div>
 
           {assign.leaders.map((leader, gi) => {
             const lslots = new Set(byName[leader?.name]?.slots || []);
@@ -318,6 +325,10 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
                   </select>
                 </div>
                 {leader && <div className="dim" style={{ marginBottom: 8 }}>집결장 시간 {[...lslots].join(", ") || "미입력"}</div>}
+                <div className="dim" style={{ marginBottom: 6 }}>집결 병종 (고른 병종 점수로만 배정)</div>
+                <Pills options={TROOPS.map((t) => t.key)} value={troopsSel[gi] || []} onChange={(v) => setTroops(gi, v)} multi xs
+                  label={(k) => TROOPS.find((t) => t.key === k).ko} />
+                <div style={{ marginBottom: 10 }} />
                 <div className="dim" style={{ marginBottom: 6 }}>필수 영웅 (5렙 보유자 수)</div>
                 <div className="pills" style={{ marginBottom: 10 }}>
                   {HERO_VALUES.map((h) => {
@@ -350,9 +361,9 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
                     <div className="dim" style={{ fontSize: 12 }}>★ = 그 사람이 5렙 보유한 영웅</div>
                   </div>
                 )}
-                <div className="dim">인원 {assign.groups[gi]?.length || 0}/{RALLY_SIZE}</div>
+                <div className="dim">인원 {assign.groups[gi]?.length || 0}/{RALLY_SIZE} · 점수 기준 {troopsLabel(gi)}</div>
                 {(assign.groups[gi] || []).map((n) => (
-                  <MemberRow key={n} name={n} sub={byName[n]} current={gi} onMove={moveMember}
+                  <MemberRow key={n} name={n} sub={byName[n]} current={gi} onMove={moveMember} score={(s) => rallyScore(s, troopsSel[gi])}
                     overlap={lslots.size === 0 || (byName[n]?.slots || []).some((x) => lslots.has(x))} />
                 ))}
               </div>
@@ -420,11 +431,11 @@ function OwnerPanel({ call, say }) {
   );
 }
 
-function MemberRow({ name, sub, current, onMove, overlap }) {
+function MemberRow({ name, sub, current, onMove, overlap, score = totalScore }) {
   return (
     <div className={`member ${overlap ? "" : "nooverlap"}`}>
       <div className="info">
-        <div className="n">{name} <span className="accent">{sub ? totalScore(sub) : "?"}</span></div>
+        <div className="n">{name} <span className="accent">{sub ? score(sub) : "?"}</span></div>
         {sub && <div className="m">{sub.slots.join(",")} · {HERO_VALUES.filter((h) => sub.heroes?.[h]).join(",") || "-"}</div>}
       </div>
       <select className="small" value={current} onChange={(e) => onMove(name, Number(e.target.value))}>
