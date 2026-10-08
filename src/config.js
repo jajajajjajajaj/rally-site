@@ -16,6 +16,7 @@ export const HEROES = [
   { value: "하워드", en: "Howard" },
   { value: "고든", en: "Gordon" },
   { value: "살로", en: "Saul" },
+  { value: "에릭", en: "Eric" },
   { value: "아마네", en: "Amane" },
   { value: "첸코", en: "Chenko" },
   { value: "트리톤", en: "Triton" },
