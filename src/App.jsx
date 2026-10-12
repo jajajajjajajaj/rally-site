@@ -15,48 +15,74 @@ const defaultTroops = () => ({ inf: 4, cav: 2, arc: 2, max: RALLY_SIZE });
 // 예전 방식(병종 선택 배열 ["inf","cav"])으로 저장된 값은 무시하고 기본값 사용
 const normTroops = (x) => ({ ...defaultTroops(), ...(x && !Array.isArray(x) && typeof x === "object" ? x : {}) });
 
-// 집결 하나 안에서 병종 자리 교환으로 약한 자리를 끌어올림
+// ----- 집결 안 병종 자리 최적화 -----
+// members를 병종 자리(dem: {inf,cav,arc} 개수)에 배치하는 모든 경우 중
+// 각 자리 레벨(TG 우선, 같으면 T)의 합이 가장 큰 배치를 찾음. (3자리 순환 교환까지 포함)
+function bestRoles(members, dem) {
+  const memo = new Map();
+  const go = (i, a, b, c) => {
+    if (i === members.length) return { total: 0, pick: [] };
+    const key = i + "," + a + "," + b + "," + c;
+    if (memo.has(key)) return memo.get(key);
+    const m = members[i];
+    let best = null;
+    for (const [k, na, nb, nc] of [["inf", a - 1, b, c], ["cav", a, b - 1, c], ["arc", a, b, c - 1]]) {
+      if (na < 0 || nb < 0 || nc < 0) continue;
+      const r = go(i + 1, na, nb, nc);
+      if (r.total < 0) continue;
+      const t = r.total + lvKey(m, k);
+      if (!best || t > best.total) best = { total: t, pick: [k, ...r.pick] };
+    }
+    const res = best || { total: -1, pick: [] };
+    memo.set(key, res);
+    return res;
+  };
+  return go(0, dem.inf || 0, dem.cav || 0, dem.arc || 0);
+}
+
+// 집결 하나를 채운 뒤 실행.
+// 1) 집결원끼리 병종 자리를 바꿔서 가장 강한 배치로 정리
+// 2) 집결원 한 명을 남은 사람 한 명으로 바꿨을 때 더 강해지면 교체 (밀려난 사람은 아래 집결 후보로)
+// 더 나아질 게 없을 때까지 반복 → 위 집결부터 강해짐. 필수 영웅 보유자는 집결에서 빼지 않음.
 function improveRoles(g, roles, getPool, setPool, lap, locked, othersFor, byName) {
-  for (let guard = 0; guard < 50; guard++) {
-    let best = null;   // { gain, apply }
-    for (const wName of g) {
-      const w = roles[wName];
-      if (!ALL_T.includes(w)) continue;
-      const W = byName[wName];
-      for (const sName of g) {
-        const s = roles[sName];
-        if (sName === wName || !ALL_T.includes(s) || s === w) continue;
-        const S = byName[sName];
-        const gainW = lvKey(S, w) - lvKey(W, w);
-        if (gainW <= 0) continue;                        // S가 w 병종에서 더 강해야 의미 있음
-        const need = lvKey(S, s);                        // S가 비우는 s 자리에 필요한 레벨
-        // (a) 서로 자리만 바꾸기: W가 s 자리를 같은 레벨 이상으로 맡을 수 있으면
-        if (lvKey(W, s) >= need) {
-          const gain = gainW + (lvKey(W, s) - need);
-          if (!best || gain > best.gain) best = { gain, apply: () => { roles[sName] = w; roles[wName] = s; } };
-          continue;
-        }
-        // (b) W를 빼고, 남은 사람 중 s 레벨이 같거나 높은 사람을 넣기
-        if (locked.has(wName)) continue;
-        const others = othersFor(s);
-        const cand = getPool()
-          .filter((p) => lvKey(p, s) >= need && lap(p) >= lap(W))
-          .sort((a, b) => (lap(b) - lap(a)) || (lvKey(b, s) - lvKey(a, s)) || (sumKey(a, others) - sumKey(b, others)))[0];
-        if (!cand) continue;
-        const gain = gainW + (lvKey(cand, s) - need);
-        if (!best || gain > best.gain) best = { gain, apply: () => {
-          roles[sName] = w;
-          g.splice(g.indexOf(wName), 1, cand.name);
-          delete roles[wName];
-          roles[cand.name] = s;
-          setPool([...getPool().filter((p) => p !== cand), W]);
-        } };
+  const troopMembers = () => g.filter((n) => ALL_T.includes(roles[n]));
+  const countOf = (names) => names.reduce((d, n) => { d[roles[n]]++; return d; }, { inf: 0, cav: 0, arc: 0 });
+  const arrange = () => {
+    const names = troopMembers();
+    if (!names.length) return 0;
+    const r = bestRoles(names.map((n) => byName[n]), countOf(names));
+    names.forEach((n, i) => { roles[n] = r.pick[i]; });
+    return r.total;
+  };
+  let total = arrange();
+  for (let guard = 0; guard < 60; guard++) {
+    const names = troopMembers();
+    const dem = countOf(names);
+    let best = null;
+    for (const xName of names) {
+      if (locked.has(xName)) continue;
+      const X = byName[xName];
+      const rest = names.filter((n) => n !== xName).map((n) => byName[n]);
+      for (const P of getPool()) {
+        if (lap(P) < lap(X)) continue;
+        const r = bestRoles([...rest, P], dem);
+        const gain = r.total - total;
+        if (gain <= 0) continue;
+        const better = !best || gain > best.gain ||
+          (gain === best.gain && (lap(P) - lap(best.P) || sumKey(best.P, ALL_T) - sumKey(P, ALL_T)) > 0);   // 동점이면 시간 겹침 → 만능형 아끼기
+        if (better) best = { gain, xName, X, P, pick: r.pick, restNames: names.filter((n) => n !== xName) };
       }
     }
     if (!best) return;
-    best.apply();
+    // 교체 적용
+    g.splice(g.indexOf(best.xName), 1, best.P.name);
+    delete roles[best.xName];
+    [...best.restNames, best.P.name].forEach((n, i) => { roles[n] = best.pick[i]; });
+    setPool([...getPool().filter((p) => p !== best.P), best.X]);
+    total += best.gain;
   }
 }
+
 function autoAssign(subs, leaders, reqs) {
   const byName = Object.fromEntries(subs.map((s) => [s.name, s]));
   const leaderNames = new Set(leaders.filter(Boolean).map((l) => l.name));
