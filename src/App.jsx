@@ -15,6 +15,48 @@ const defaultTroops = () => ({ inf: 4, cav: 2, arc: 2, max: RALLY_SIZE });
 // 예전 방식(병종 선택 배열 ["inf","cav"])으로 저장된 값은 무시하고 기본값 사용
 const normTroops = (x) => ({ ...defaultTroops(), ...(x && !Array.isArray(x) && typeof x === "object" ? x : {}) });
 
+// 집결 하나 안에서 병종 자리 교환으로 약한 자리를 끌어올림
+function improveRoles(g, roles, getPool, setPool, lap, locked, othersFor, byName) {
+  for (let guard = 0; guard < 50; guard++) {
+    let best = null;   // { gain, apply }
+    for (const wName of g) {
+      const w = roles[wName];
+      if (!ALL_T.includes(w)) continue;
+      const W = byName[wName];
+      for (const sName of g) {
+        const s = roles[sName];
+        if (sName === wName || !ALL_T.includes(s) || s === w) continue;
+        const S = byName[sName];
+        const gainW = lvKey(S, w) - lvKey(W, w);
+        if (gainW <= 0) continue;                        // S가 w 병종에서 더 강해야 의미 있음
+        const need = lvKey(S, s);                        // S가 비우는 s 자리에 필요한 레벨
+        // (a) 서로 자리만 바꾸기: W가 s 자리를 같은 레벨 이상으로 맡을 수 있으면
+        if (lvKey(W, s) >= need) {
+          const gain = gainW + (lvKey(W, s) - need);
+          if (!best || gain > best.gain) best = { gain, apply: () => { roles[sName] = w; roles[wName] = s; } };
+          continue;
+        }
+        // (b) W를 빼고, 남은 사람 중 s 레벨이 같거나 높은 사람을 넣기
+        if (locked.has(wName)) continue;
+        const others = othersFor(s);
+        const cand = getPool()
+          .filter((p) => lvKey(p, s) >= need && lap(p) >= lap(W))
+          .sort((a, b) => (lap(b) - lap(a)) || (lvKey(b, s) - lvKey(a, s)) || (sumKey(a, others) - sumKey(b, others)))[0];
+        if (!cand) continue;
+        const gain = gainW + (lvKey(cand, s) - need);
+        if (!best || gain > best.gain) best = { gain, apply: () => {
+          roles[sName] = w;
+          g.splice(g.indexOf(wName), 1, cand.name);
+          delete roles[wName];
+          roles[cand.name] = s;
+          setPool([...getPool().filter((p) => p !== cand), W]);
+        } };
+      }
+    }
+    if (!best) return;
+    best.apply();
+  }
+}
 function autoAssign(subs, leaders, reqs) {
   const byName = Object.fromEntries(subs.map((s) => [s.name, s]));
   const leaderNames = new Set(leaders.filter(Boolean).map((l) => l.name));
@@ -34,7 +76,8 @@ function autoAssign(subs, leaders, reqs) {
     const othersFor = (k) => { const o = ALL_T.filter((x) => !usedT.includes(x)); return o.length ? o : ALL_T.filter((x) => x !== k); };
     const add = (s, role) => { g.push(s.name); roles[s.name] = role; pool = pool.filter((p) => p !== s); if (dem[role] > 0) dem[role]--; };
 
-    // 1) 필수 영웅
+    // 1) 필수 영웅 (이 사람들은 교환 점검에서 집결 밖으로 빼지 않음)
+    const heroLocked = new Set();
     const need = reqs[gi] || {};
     for (const hero of Object.keys(need)) {
       let n = need[hero];
@@ -46,6 +89,7 @@ function autoAssign(subs, leaders, reqs) {
         holders.sort((a, b) => (lap(b) - lap(a)) || ((bestRole(b) ? lvKey(b, bestRole(b)) : overallKey(b)) - (bestRole(a) ? lvKey(a, bestRole(a)) : overallKey(a))));
         const s = holders[0];
         add(s, bestRole(s) || "fill");
+        heroLocked.add(s.name);
         n--;
       }
     }
@@ -57,6 +101,10 @@ function autoAssign(subs, leaders, reqs) {
       pool.sort((a, b) => (lap(b) - lap(a)) || (lvKey(b, k) - lvKey(a, k)) || (sumKey(a, others) - sumKey(b, others)));
       add(pool[0], k);
     }
+    // 2-1) 교환 점검: 약하게 채워진 병종 자리를, 같은 집결 안에서 그 병종이 더 강한 사람으로 바꿈.
+    //      그 사람이 비운 자리는 (밀려나는 사람 본인 또는) 남은 사람 중 같은 레벨 이상인 사람으로 메움.
+    //      → 위 집결이 먼저 강해지고, 밀려난 사람은 아래 집결 후보로 돌아감.
+    improveRoles(g, roles, () => pool, (p) => { pool = p; }, lap, heroLocked, othersFor, byName);
     // 3) 남는 자리는 종합 순
     pool.sort((a, b) => (lap(b) - lap(a)) || (overallKey(b) - overallKey(a)));
     while (g.length < cap && pool.length) add(pool[0], "fill");
