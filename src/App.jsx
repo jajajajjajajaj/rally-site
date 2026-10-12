@@ -55,7 +55,7 @@ function improveRoles(g, roles, getPool, setPool, lap, locked, othersFor, byName
     return r.total;
   };
   let total = arrange();
-  for (let guard = 0; guard < 60; guard++) {
+  for (let guard = 0; guard < 120; guard++) {
     const names = troopMembers();
     const dem = countOf(names);
     let best = null;
@@ -67,10 +67,13 @@ function improveRoles(g, roles, getPool, setPool, lap, locked, othersFor, byName
         if (lap(P) < lap(X)) continue;
         const r = bestRoles([...rest, P], dem);
         const gain = r.total - total;
-        if (gain <= 0) continue;
+        // 자리 레벨이 같아지는 교체(gain 0)라도, 들어오는 사람이 종합적으로 더 약하면 교체:
+        // 이 집결은 그대로이고 만능형이 아래 집결로 내려가 그쪽을 강하게 만듦
+        const spare = overallKey(X) - overallKey(P);
+        if (gain < 0 || (gain === 0 && spare <= 0)) continue;
         const better = !best || gain > best.gain ||
-          (gain === best.gain && (lap(P) - lap(best.P) || sumKey(best.P, ALL_T) - sumKey(P, ALL_T)) > 0);   // 동점이면 시간 겹침 → 만능형 아끼기
-        if (better) best = { gain, xName, X, P, pick: r.pick, restNames: names.filter((n) => n !== xName) };
+          (gain === best.gain && ((spare - best.spare) || (lap(P) - lap(best.P))) > 0);
+        if (better) best = { gain, spare, xName, X, P, pick: r.pick, restNames: names.filter((n) => n !== xName) };
       }
     }
     if (!best) return;
