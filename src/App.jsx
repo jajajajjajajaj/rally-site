@@ -360,6 +360,13 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
     const n = Math.max(0, Math.min(20, parseInt(v, 10) || 0));
     save({ ...assign, reqs: { ...assign.reqs, troops: { ...(assign.reqs.troops || {}), [gi]: { ...troopsOf(gi), [k]: n } } } });
   };
+  // 배정 초기화: 집결원·병종 표시·탑승 지정만 비움. 집결장, 병종 인원, 필수 영웅 설정은 유지
+  const resetAssign = () => {
+    if (!confirm("배정을 초기화할까요? 모든 집결원이 미배정으로 돌아가요. 집결장과 병종 인원·필수 영웅 설정은 그대로 남아요.")) return;
+    const leaderNames = new Set(assign.leaders.filter(Boolean).map((l) => l.name));
+    const { roles, riders, ...rest } = assign.reqs;
+    save({ ...assign, groups: assign.groups.map(() => []), unassigned: subs.map((s) => s.name).filter((n) => !leaderNames.has(n)), reqs: rest });
+  };
   const togglePublish = () => save({ ...assign, published: !assign.published });
   const removeSub = async (name) => {
     if (!confirm(`${name} 제출을 삭제할까요?`)) return;
@@ -416,7 +423,10 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
               <Btn small kind={assign.published ? "danger" : "primary"} onClick={togglePublish}>{assign.published ? "비공개로" : "공개하기"}</Btn>
             </div>
           </div>
-          <Btn onClick={runAuto} disabled={!subs.length}>자동 배정 실행</Btn>
+          <div className="row" style={{ gap: 8 }}>
+            <div style={{ flex: 1 }}><Btn onClick={runAuto} disabled={!subs.length}>자동 배정 실행</Btn></div>
+            <Btn small kind="danger" onClick={resetAssign} disabled={!assign.groups.some((g) => g.length)}>배정 초기화</Btn>
+          </div>
           <div className="dim" style={{ margin: "6px 0 16px" }}>1번 집결부터 차례로, 지정한 병종 자리마다 그 병종 레벨(TG 우선, 같으면 T)이 높은 사람을 넣어요. 레벨이 같으면 그 집결이 안 쓰는 병종이 약한 사람을 먼저 넣어서 모든 병종이 강한 사람은 뒤로 남깁니다. 필수 영웅 5렙 보유자는 먼저 확보하고, 병종 합계가 최대 인원보다 적으면 남는 자리는 종합 순으로 채워요. 집결장과 시간이 겹치는 사람을 먼저 보고, 회색 이름은 겹치는 시간이 없는 사람이에요.</div>
 
           {assign.leaders.map((leader, gi) => {
