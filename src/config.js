@@ -11,7 +11,7 @@ export const SLOT_VALUES = SLOTS.map((s) => s.value);
 
 // 영웅: value는 저장되는 값, en은 영어 표시명 (게임 내 영문명으로 수정하세요)
 export const HEROES = [
-  { value: "파드", en: "Pard" },
+  { value: "파드", en: "Fahd" },
   { value: "힐데", en: "Hilde" },
   { value: "하워드", en: "Howard" },
   { value: "고든", en: "Gordon" },
@@ -33,20 +33,21 @@ export const TROOPS = [
 export const TG_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const T_LEVELS = [9, 10, 11];
 export const RANK_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "그 외"];
-export const RALLY_SIZE = 8;
-export const RIDER_RALLIES = 6;   // 영웅 탑승 지정을 적용할 집결 수 (1~6번)
+export const RALLY_SIZE = 8;          // 집결 기본 최대 인원 (집결마다 관리자가 변경 가능)
+export const MAX_RALLIES = 8;         // 집결(집결장) 최대 개수
+export const RIDER_RALLIES = 8;       // 영웅 탑승 지정을 적용할 집결 수
 export const RIDERS_PER_RALLY = 4;
 
-// 점수: 병종 가중치 × (TG×10 + (T−8)×3)
-export const troopScore = (tg, t) => tg * 10 + (t - 8) * 3;
-export const totalScore = (s) =>
-  TROOPS.reduce((acc, tr) => acc + tr.w * troopScore(s[tr.key + "_tg"], s[tr.key + "_t"]), 0);
-// 집결별 병종 점수: 집결장이 고른 병종(keys: "inf"/"arc"/"cav")만 가중치 없이 합산.
-// 고른 병종이 없으면 기존 가중 합산(totalScore)을 그대로 사용.
-export const rallyScore = (s, keys) =>
-  !keys || keys.length === 0
-    ? totalScore(s)
-    : TROOPS.filter((tr) => keys.includes(tr.key)).reduce((acc, tr) => acc + troopScore(s[tr.key + "_tg"], s[tr.key + "_t"]), 0);
+// ===== 병력 비교 (점수 없음) =====
+// 병종 레벨은 TG가 우선, TG가 같으면 T로 비교. 아래 키는 정렬용일 뿐 화면에 표시하지 않음.
+export const ASSIGN_TROOPS = [            // 관리자 배정 화면 표시 순서: 보 · 기 · 궁
+  { key: "inf", ko: "보병" },
+  { key: "cav", ko: "기병" },
+  { key: "arc", ko: "궁병" },
+];
+export const lvKey = (s, k) => (s[k + "_tg"] || 0) * 100 + (s[k + "_t"] || 0);
+export const sumKey = (s, keys) => keys.reduce((a, k) => a + lvKey(s, k), 0);
+export const overallKey = (s) => sumKey(s, ["inf", "cav", "arc"]);
 
 // ===== 문구 =====
 export const STR = {

@@ -1,47 +1,75 @@
 import { useState, useEffect } from "react";
 import * as api from "./api.js";
-import { SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, RIDER_RALLIES, RIDERS_PER_RALLY, totalScore, rallyScore, STR } from "./config.js";
+import { SLOTS, SLOT_VALUES, HEROES, HERO_VALUES, TROOPS, TG_LEVELS, T_LEVELS, RANK_VALUES, RALLY_SIZE, MAX_RALLIES, RIDER_RALLIES, RIDERS_PER_RALLY, ASSIGN_TROOPS, lvKey, sumKey, overallKey, STR } from "./config.js";
 
 // ===== 자동 배정 =====
-// 1) 집결장과 겹치는 시간이 있는 사람 우선, 그 안에서 점수 높은 순
-//    - 점수는 집결장이 고른 병종(reqs.troops[gi])만 합산. 안 고르면 전체 가중 점수
-// 2) 집결마다 지정된 필수 영웅 5렙 보유자를 먼저 확보
-// 3) 1번 집결부터 순서대로 8명씩
+// 점수 없이 병종 레벨(TG 우선, 같으면 T)로 비교.
+// 집결마다 관리자가 정한 보병/기병/궁병 인원수와 최대 인원(reqs.troops[gi])대로 채움.
+// 1) 필수 영웅 5렙 보유자를 먼저 확보 (그 사람이 가장 강한 병종 자리에 배치)
+// 2) 병종 자리마다 그 병종 레벨이 높은 사람 → 같으면 이 집결이 안 쓰는 병종이 약한 사람 먼저
+//    (모든 병종이 강한 사람은 뒤로 남김. 맞는 사람이 부족하면 그때 들어감)
+// 3) 병종 합계가 최대 인원보다 적으면 남는 자리는 종합 레벨 순
+// 집결장과 가능 시간이 겹치는 사람을 항상 먼저 봄.
+const ALL_T = ["inf", "cav", "arc"];
+const defaultTroops = () => ({ inf: 4, cav: 2, arc: 2, max: RALLY_SIZE });
+// 예전 방식(병종 선택 배열 ["inf","cav"])으로 저장된 값은 무시하고 기본값 사용
+const normTroops = (x) => ({ ...defaultTroops(), ...(x && !Array.isArray(x) && typeof x === "object" ? x : {}) });
+
 function autoAssign(subs, leaders, reqs) {
   const byName = Object.fromEntries(subs.map((s) => [s.name, s]));
   const leaderNames = new Set(leaders.filter(Boolean).map((l) => l.name));
   let pool = subs.filter((s) => !leaderNames.has(s.name));
   const groups = leaders.map(() => []);
+  const roles = {};
 
   leaders.forEach((leader, gi) => {
     if (!leader) return;
+    const g = groups[gi];
+    const tr = normTroops(reqs.troops?.[gi]);
+    const cap = Math.max(0, Number(tr.max) || 0);
+    const dem = { inf: +tr.inf || 0, cav: +tr.cav || 0, arc: +tr.arc || 0 };
+    const usedT = ALL_T.filter((k) => dem[k] > 0);
     const lslots = new Set(byName[leader.name]?.slots || []);
-    const overlaps = (s) => (lslots.size === 0 ? true : (s.slots || []).some((x) => lslots.has(x)));
-    const score = (s) => rallyScore(s, reqs.troops?.[gi]);
-    const order = (a, b) => (overlaps(b) - overlaps(a)) || (score(b) - score(a));
-    pool.sort(order);
+    const lap = (s) => (lslots.size === 0 || (s.slots || []).some((x) => lslots.has(x)) ? 1 : 0);
+    const othersFor = (k) => { const o = ALL_T.filter((x) => !usedT.includes(x)); return o.length ? o : ALL_T.filter((x) => x !== k); };
+    const add = (s, role) => { g.push(s.name); roles[s.name] = role; pool = pool.filter((p) => p !== s); if (dem[role] > 0) dem[role]--; };
 
+    // 1) 필수 영웅
     const need = reqs[gi] || {};
     for (const hero of Object.keys(need)) {
       let n = need[hero];
-      while (n > 0 && groups[gi].length < RALLY_SIZE) {
-        const idx = pool.findIndex((s) => s.heroes?.[hero]);
-        if (idx < 0) break;
-        groups[gi].push(pool[idx].name); pool.splice(idx, 1); n--;
+      while (n > 0 && g.length < cap) {
+        const holders = pool.filter((s) => s.heroes?.[hero]);
+        if (!holders.length) break;
+        const open = ALL_T.filter((k) => dem[k] > 0);
+        const bestRole = (s) => (open.length ? open.reduce((a, k) => (lvKey(s, k) > lvKey(s, a) ? k : a), open[0]) : null);
+        holders.sort((a, b) => (lap(b) - lap(a)) || ((bestRole(b) ? lvKey(b, bestRole(b)) : overallKey(b)) - (bestRole(a) ? lvKey(a, bestRole(a)) : overallKey(a))));
+        const s = holders[0];
+        add(s, bestRole(s) || "fill");
+        n--;
       }
     }
-    while (groups[gi].length < RALLY_SIZE && pool.length) groups[gi].push(pool.shift().name);
+    // 2) 병종 자리: 남은 수요가 가장 많은 병종부터 한 명씩
+    while (g.length < cap && pool.length) {
+      const open = ALL_T.filter((k) => dem[k] > 0).sort((a, b) => dem[b] - dem[a]);
+      if (!open.length) break;
+      const k = open[0], others = othersFor(k);
+      pool.sort((a, b) => (lap(b) - lap(a)) || (lvKey(b, k) - lvKey(a, k)) || (sumKey(a, others) - sumKey(b, others)));
+      add(pool[0], k);
+    }
+    // 3) 남는 자리는 종합 순
+    pool.sort((a, b) => (lap(b) - lap(a)) || (overallKey(b) - overallKey(a)));
+    while (g.length < cap && pool.length) add(pool[0], "fill");
   });
-  pool.sort((a, b) => totalScore(b) - totalScore(a));
-  return { groups, unassigned: pool.map((s) => s.name) };
+  pool.sort((a, b) => overallKey(b) - overallKey(a));
+  return { groups, unassigned: pool.map((s) => s.name), roles };
 }
 
-// 필수 영웅 설정(reqs)을 바탕으로 집결별 탑승 영웅 자동 채우기 (1~RIDER_RALLIES번 집결, 집결당 RIDERS_PER_RALLY명)
+// 필수 영웅 설정(reqs)을 바탕으로 집결별 탑승 영웅 자동 채우기 (집결당 4명)
 function autoRiders(groups, reqs, byName) {
   const riders = {};
-  for (let gi = 0; gi < RIDER_RALLIES; gi++) {
-    const score = (s) => rallyScore(s, reqs.troops?.[gi]);
-    const members = (groups[gi] || []).map((n) => byName[n]).filter(Boolean).sort((a, b) => score(b) - score(a));
+  for (let gi = 0; gi < Math.min(RIDER_RALLIES, groups.length); gi++) {
+    const members = (groups[gi] || []).map((n) => byName[n]).filter(Boolean).sort((a, b) => overallKey(b) - overallKey(a));
     const used = new Set(); const list = [];
     for (const hero of Object.keys(reqs[gi] || {})) {
       let n = reqs[gi][hero];
@@ -187,7 +215,10 @@ function UserResult({ server, season, lang }) {
 }
 
 // ===== 관리자 =====
-const EMPTY_ASSIGN = { leaders: Array(6).fill(null), reqs: {}, groups: Array(6).fill([]), unassigned: [], published: false };
+const EMPTY_ASSIGN = { leaders: Array(MAX_RALLIES).fill(null), reqs: {}, groups: Array(MAX_RALLIES).fill([]), unassigned: [], published: false };
+// 예전(6개 집결) 저장분도 8개로 맞춰서 읽기
+const pad = (arr, fill) => { const a = [...(arr || [])]; while (a.length < MAX_RALLIES) a.push(fill); return a.slice(0, MAX_RALLIES); };
+const lvStr = (s) => ASSIGN_TROOPS.map((t) => `${s[t.key + "_tg"]}·${s[t.key + "_t"]}`).join(" / ");
 
 function Admin({ code, server, owner, season, setSeason, logout }) {
   const [tab, setTab] = useState("list");
@@ -208,9 +239,9 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
       const { data: list } = await call("list_submissions", { server, season });
       setSubs(list || []);
       const { data: a } = await call("get_assignment", { server, season });
-      if (a) setAssign({ leaders: a.leaders, reqs: a.reqs, groups: a.groups, unassigned: a.unassigned, published: a.published });
+      if (a) setAssign({ leaders: pad(a.leaders, null), reqs: a.reqs || {}, groups: pad(a.groups, []), unassigned: a.unassigned || [], published: a.published });
       else {
-        const leaders = Array(6).fill(null).map((_, i) => { const s = (list || []).find((x) => x.trial_rank === String(i + 1)); return s ? { name: s.name } : null; });
+        const leaders = Array(MAX_RALLIES).fill(null).map((_, i) => { const s = (list || []).find((x) => x.trial_rank === String(i + 1)); return s ? { name: s.name } : null; });
         setAssign({ ...EMPTY_ASSIGN, leaders });
       }
     } catch {}
@@ -226,10 +257,6 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
 
   const riders = assign.reqs.riders || {};
   const setRiders = (gi, list) => save({ ...assign, reqs: { ...assign.reqs, riders: { ...riders, [gi]: list } } });
-  // 집결별 병종 선택 {gi: ["inf","cav"]} — 바로 저장
-  const troopsSel = assign.reqs.troops || {};
-  const setTroops = (gi, keys) => save({ ...assign, reqs: { ...assign.reqs, troops: { ...troopsSel, [gi]: keys } } });
-  const troopsLabel = (gi) => (troopsSel[gi]?.length ? troopsSel[gi].map((k) => TROOPS.find((t) => t.key === k)?.ko).join("+") : "전체(가중)");
   const setRider = (gi, i, patch) => {
     const list = [...(riders[gi] || [])];
     while (list.length <= i) list.push({ name: "", hero: "" });
@@ -239,19 +266,25 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
   const runAuto = () => {
     const r = autoAssign(subs, assign.leaders, assign.reqs);
     const auto = autoRiders(r.groups, assign.reqs, byName);
-    save({ ...assign, ...r, reqs: { ...assign.reqs, riders: auto } });
+    save({ ...assign, groups: r.groups, unassigned: r.unassigned, reqs: { ...assign.reqs, riders: auto, roles: r.roles } });
   };
   const moveMember = (name, toIdx) => {
     const groups = assign.groups.map((g) => g.filter((n) => n !== name));
     let unassigned = assign.unassigned.filter((n) => n !== name);
     if (toIdx === -1) unassigned = [...unassigned, name]; else groups[toIdx] = [...groups[toIdx], name];
-    save({ ...assign, groups, unassigned });
+    const roles = { ...(assign.reqs.roles || {}) }; delete roles[name];   // 손으로 옮긴 사람은 병종 표시 해제
+    save({ ...assign, groups, unassigned, reqs: { ...assign.reqs, roles } });
   };
   const setLeader = (gi, name) => save({ ...assign, leaders: assign.leaders.map((l, i) => (i === gi ? (name ? { name } : null) : l)) });
   const setReq = (gi, hero, n) => {
     const cur = { ...(assign.reqs[gi] || {}) };
     if (n > 0) cur[hero] = n; else delete cur[hero];
     setAssign({ ...assign, reqs: { ...assign.reqs, [gi]: cur } });
+  };
+  const troopsOf = (gi) => normTroops(assign.reqs.troops?.[gi]);
+  const setTroop = (gi, k, v) => {
+    const n = Math.max(0, Math.min(20, parseInt(v, 10) || 0));
+    save({ ...assign, reqs: { ...assign.reqs, troops: { ...(assign.reqs.troops || {}), [gi]: { ...troopsOf(gi), [k]: n } } } });
   };
   const togglePublish = () => save({ ...assign, published: !assign.published });
   const removeSub = async (name) => {
@@ -263,7 +296,7 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
     try { const r = await call("new_season", { server }); setSeason(r.season); } catch {}
   };
 
-  const sorted = [...subs].sort((a, b) => totalScore(b) - totalScore(a));
+  const sorted = [...subs].sort((a, b) => overallKey(b) - overallKey(a));
   const troopStr = (s) => TROOPS.map((t) => `${t.ko} TG${s[t.key + "_tg"]}/T${s[t.key + "_t"]}`).join(" · ");
   const heroStr = (s) => HERO_VALUES.filter((h) => s.heroes?.[h]).join(",") || "-";
 
@@ -281,7 +314,7 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
       {!loading && tab === "list" && (
         <div>
           <div className="row" style={{ marginBottom: 12 }}>
-            <span className="dim">병력 점수 높은 순</span>
+            <span className="dim">종합 레벨 높은 순 (TG 우선)</span>
             <Btn small kind="ghost" onClick={reload}>새로고침</Btn>
           </div>
           {sorted.length === 0 && <div className="dim">아직 제출이 없어요.</div>}
@@ -289,7 +322,6 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
             <div key={s.name} className="card">
               <div className="row">
                 <span className="name">{s.name} <span className="dim">시련 {s.trial_rank}</span></span>
-                <span className="score">{totalScore(s)}</span>
               </div>
               <div style={{ fontSize: 14, marginTop: 4 }}>{troopStr(s)}</div>
               <div className="dim" style={{ marginTop: 4 }}>시간 {s.slots.join(", ")} · 5렙 {heroStr(s)}</div>
@@ -311,24 +343,32 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
             </div>
           </div>
           <Btn onClick={runAuto} disabled={!subs.length}>자동 배정 실행</Btn>
-          <div className="dim" style={{ margin: "6px 0 16px" }}>1번 집결부터 강한 순서로 채워요. 집결마다 병종을 고르면 그 병종 점수만으로 순위를 매기고(안 고르면 전체 가중 점수), 집결장과 시간이 겹치는 사람을 먼저 넣고, 필수 영웅을 지정하면 그 영웅 5렙 보유자를 우선 확보해요. 회색 이름은 집결장과 겹치는 시간이 없는 사람이에요.</div>
+          <div className="dim" style={{ margin: "6px 0 16px" }}>1번 집결부터 차례로, 지정한 병종 자리마다 그 병종 레벨(TG 우선, 같으면 T)이 높은 사람을 넣어요. 레벨이 같으면 그 집결이 안 쓰는 병종이 약한 사람을 먼저 넣어서 모든 병종이 강한 사람은 뒤로 남깁니다. 필수 영웅 5렙 보유자는 먼저 확보하고, 병종 합계가 최대 인원보다 적으면 남는 자리는 종합 순으로 채워요. 집결장과 시간이 겹치는 사람을 먼저 보고, 회색 이름은 겹치는 시간이 없는 사람이에요.</div>
 
           {assign.leaders.map((leader, gi) => {
             const lslots = new Set(byName[leader?.name]?.slots || []);
+            const tr = troopsOf(gi);
+            const tsum = tr.inf + tr.cav + tr.arc;
+            const roles = assign.reqs.roles || {};
             return (
               <div key={gi} className="panel">
                 <div className="row" style={{ marginBottom: 8 }}>
                   <span className="accent" style={{ fontSize: 18, fontWeight: 700, whiteSpace: "nowrap" }}>{gi + 1}번</span>
                   <select value={leader?.name || ""} onChange={(e) => setLeader(gi, e.target.value)} style={{ padding: "6px 8px", fontSize: 14 }}>
                     <option value="">집결장 없음</option>
-                    {sorted.map((s) => <option key={s.name} value={s.name}>{s.name} (시련 {s.trial_rank}, {totalScore(s)}점)</option>)}
+                    {sorted.map((s) => <option key={s.name} value={s.name}>{s.name} (시련 {s.trial_rank}, 보·기·궁 {lvStr(s)})</option>)}
                   </select>
                 </div>
                 {leader && <div className="dim" style={{ marginBottom: 8 }}>집결장 시간 {[...lslots].join(", ") || "미입력"}</div>}
-                <div className="dim" style={{ marginBottom: 6 }}>집결 병종 (고른 병종 점수로만 배정)</div>
-                <Pills options={TROOPS.map((t) => t.key)} value={troopsSel[gi] || []} onChange={(v) => setTroops(gi, v)} multi xs
-                  label={(k) => TROOPS.find((t) => t.key === k).ko} />
-                <div style={{ marginBottom: 10 }} />
+                <div className="troopset">
+                  {ASSIGN_TROOPS.map((t) => (
+                    <label key={t.key}><span className={`tt ${t.key}`}>{t.ko}</span>
+                      <input type="number" inputMode="numeric" min="0" max="20" value={tr[t.key]} onChange={(e) => setTroop(gi, t.key, e.target.value)} /></label>
+                  ))}
+                  <label><span className="dim">최대</span>
+                    <input type="number" inputMode="numeric" min="0" max="20" value={tr.max} onChange={(e) => setTroop(gi, "max", e.target.value)} /></label>
+                  <span className={`tsum ${tsum > tr.max ? "over" : ""}`} title="병종 지정 합계 / 최대 인원">{tsum}/{tr.max}</span>
+                </div>
                 <div className="dim" style={{ marginBottom: 6 }}>필수 영웅 (5렙 보유자 수)</div>
                 <div className="pills" style={{ marginBottom: 10 }}>
                   {HERO_VALUES.map((h) => {
@@ -361,9 +401,9 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
                     <div className="dim" style={{ fontSize: 12 }}>★ = 그 사람이 5렙 보유한 영웅</div>
                   </div>
                 )}
-                <div className="dim">인원 {assign.groups[gi]?.length || 0}/{RALLY_SIZE} · 점수 기준 {troopsLabel(gi)}</div>
+                <div className="dim">인원 {assign.groups[gi]?.length || 0}/{tr.max}</div>
                 {(assign.groups[gi] || []).map((n) => (
-                  <MemberRow key={n} name={n} sub={byName[n]} current={gi} onMove={moveMember} score={(s) => rallyScore(s, troopsSel[gi])}
+                  <MemberRow key={n} name={n} sub={byName[n]} current={gi} onMove={moveMember} role={roles[n]}
                     overlap={lslots.size === 0 || (byName[n]?.slots || []).some((x) => lslots.has(x))} />
                 ))}
               </div>
@@ -382,7 +422,7 @@ function Admin({ code, server, owner, season, setSeason, logout }) {
             <Btn kind="ghost" onClick={newSeason}>{season + 1}회차 시작</Btn>
           </Field>
           {owner ? <OwnerPanel call={call} say={say} /> : <Field label="관리자 코드" hint="코드 변경은 총괄 관리자에게 요청하세요." />}
-          <Field label="점수 기준" hint="병종 가중치 보병 3 · 궁병 2 · 기병 1 / 병종 점수 = TG×10 + (T−8)×3 (src/config.js에서 조정)" />
+          <Field label="배정 기준" hint="점수 없이 병종 레벨로 비교해요. TG가 높은 쪽이 우선이고, TG가 같으면 T로 비교합니다." />
           <Btn kind="ghost" onClick={logout}>로그아웃</Btn>
         </div>
       )}
@@ -431,15 +471,16 @@ function OwnerPanel({ call, say }) {
   );
 }
 
-function MemberRow({ name, sub, current, onMove, overlap, score = totalScore }) {
+function MemberRow({ name, sub, current, onMove, overlap, role }) {
+  const rt = ASSIGN_TROOPS.find((t) => t.key === role);
   return (
     <div className={`member ${overlap ? "" : "nooverlap"}`}>
       <div className="info">
-        <div className="n">{name} <span className="accent">{sub ? score(sub) : "?"}</span></div>
-        {sub && <div className="m">{sub.slots.join(",")} · {HERO_VALUES.filter((h) => sub.heroes?.[h]).join(",") || "-"}</div>}
+        <div className="n">{rt ? <span className={`tt ${rt.key}`}>{rt.ko}</span> : role === "fill" ? <span className="tt fill">종합</span> : null} {name}</div>
+        {sub && <div className="m">보·기·궁 {ASSIGN_TROOPS.map((t) => <b key={t.key} className={role === t.key ? "on" : ""}>{sub[t.key + "_tg"]}·{sub[t.key + "_t"]}</b>).reduce((a, x, i) => (i ? [...a, " / ", x] : [x]), [])} · {sub.slots.join(",")} · {HERO_VALUES.filter((h) => sub.heroes?.[h]).join(",") || "-"}</div>}
       </div>
       <select className="small" value={current} onChange={(e) => onMove(name, Number(e.target.value))}>
-        {[0, 1, 2, 3, 4, 5].map((i) => <option key={i} value={i}>{i + 1}번</option>)}
+        {Array.from({ length: MAX_RALLIES }, (_, i) => i).map((i) => <option key={i} value={i}>{i + 1}번</option>)}
         <option value={-1}>미배정</option>
       </select>
     </div>
