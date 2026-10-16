@@ -666,7 +666,7 @@ export default function App() {
       {view === "admin" && admin && season && (
         <Admin code={admin.code} server={admin.server} owner={admin.owner} season={season} setSeason={setSeason} logout={logout} />
       )}
-      <div className="made-by">made by 베이컨(943) 서버 추가문의 943 베이컨</div>
+      <div className="made-by">made by 베이컨(943)<br />서버 추가 문의: 943 베이컨</div>
     </div>
   );
 }
